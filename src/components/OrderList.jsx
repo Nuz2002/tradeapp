@@ -40,7 +40,7 @@ const OrdersList = () => {
   return (
     <div className="container mx-auto p-4">
       <TradingStats orders={orders} />
-      <div className="mt-4">
+      <div className="mt-4 space-y-3">
         {orders.map(order => (
           <OrderCard key={order.id} order={order} />
         ))}
