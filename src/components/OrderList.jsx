@@ -16,8 +16,9 @@ const OrdersList = () => {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
+        const sortedOrders = data.orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         console.log(data);
-        setOrders(data.orders);
+        setOrders(sortedOrders);
       } catch (error) {
         console.error('Error fetching orders:', error);
         setError(error.message);
