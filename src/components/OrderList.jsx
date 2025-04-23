@@ -1,4 +1,3 @@
-// src/components/OrdersList.jsx
 import React, { useEffect, useState } from 'react';
 import OrderCard from './OrderCard';
 import TradingStats from './TradingStats';
@@ -7,6 +6,7 @@ const OrdersList = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -17,7 +17,6 @@ const OrdersList = () => {
         }
         const data = await response.json();
         const sortedOrders = data.orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        console.log(data);
         setOrders(sortedOrders);
       } catch (error) {
         console.error('Error fetching orders:', error);
@@ -29,6 +28,10 @@ const OrdersList = () => {
 
     fetchOrders();
   }, []);
+
+  const handleToggle = (orderId) => {
+    setExpandedOrderId(prevId => prevId === orderId ? null : orderId);
+  };
 
   if (loading) {
     return <div className="text-center p-4">Loading orders...</div>;
@@ -43,7 +46,12 @@ const OrdersList = () => {
       <TradingStats orders={orders} />
       <div className="mt-4 space-y-3">
         {orders.map(order => (
-          <OrderCard key={order.id} order={order} />
+          <OrderCard 
+            key={order.id}
+            order={order}
+            isExpanded={order.id === expandedOrderId}
+            onToggle={() => handleToggle(order.id)}
+          />
         ))}
       </div>
     </div>

@@ -1,10 +1,17 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ChevronDown, ChevronUp } from 'react-feather';
 
-const OrderCard = ({ order }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const statusBgColor = order.status === 'win' ? 'bg-green-100' : 'bg-red-100';
-  const statusBorderColor = order.status === 'win' ? 'border-green-500' : 'border-red-500';
+const OrderCard = ({ order, isExpanded, onToggle }) => {
+  let statusBorderColor;
+
+  if (order.status === 'win') {
+    statusBorderColor = 'border-green-500';
+  } else if (order.status === 'in_progress') {
+    statusBorderColor = 'border-blue-500';
+  } else {
+    statusBorderColor = 'border-red-500';
+  }
+
   const sideTextColor = order.side === 'Buy' ? 'text-green-700' : 'text-red-700';
 
   const formatNumber = (value) => 
@@ -24,8 +31,8 @@ const OrderCard = ({ order }) => {
 
   return (
     <div 
-      className={`rounded-lg shadow-md p-4 m-2 ${statusBgColor} border-l-4 ${statusBorderColor} cursor-pointer transition-all`}
-      onClick={() => setIsExpanded(!isExpanded)}
+      className={`rounded-lg shadow-md p-4 m-2 border-l-4 ${statusBorderColor} cursor-pointer transition-all`}
+      onClick={onToggle}
     >
       <div className="flex justify-between items-center mb-2">
         <h3 className="text-lg font-semibold">{order.symbol}</h3>
