@@ -16,6 +16,7 @@ const OrdersList = () => {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
+        console.log(data);
         const sortedOrders = data.orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         setOrders(sortedOrders);
       } catch (error) {

@@ -12,6 +12,7 @@ const OrderCard = ({ order, isExpanded, onToggle }) => {
     statusBorderColor = 'border-red-500';
   }
 
+
   const sideTextColor = order.side === 'Buy' ? 'text-green-700' : 'text-red-700';
 
   const formatNumber = (value) => 
@@ -38,7 +39,14 @@ const OrderCard = ({ order, isExpanded, onToggle }) => {
         <h3 className="text-lg font-semibold">{order.symbol}</h3>
         <div className="flex items-center gap-2">
           <span className={`font-bold ${sideTextColor}`}>{order.side}</span>
-          <span className={`text-sm px-2 py-1 rounded ${order.status === 'win' ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}`}>
+          <span className={`text-sm px-2 py-1 rounded ${
+            order.status === 'win' 
+              ? 'bg-green-200 text-green-800' 
+              : order.status === 'in_progress' 
+                ? 'bg-blue-200 text-blue-800' 
+                : 'bg-red-200 text-red-800'
+          }`}>
+
             {order.status.toUpperCase()}
           </span>
           {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
