@@ -18,12 +18,12 @@ const TradingStats = ({ orders }) => {
           <p className="text-2xl font-bold">{totalOrders}</p>
         </div>
         
-        <div className="bg-green-50 p-3 rounded-md">
+        <div className="bg-gray-50 p-3 rounded-md">
           <p className="text-sm text-gray-500">Buy Orders</p>
           <p className="text-2xl font-bold text-green-700">{buyOrders}</p>
         </div>
         
-        <div className="bg-red-50 p-3 rounded-md">
+        <div className="bg-gray-50 p-3 rounded-md">
           <p className="text-sm text-gray-500">Sell Orders</p>
           <p className="text-2xl font-bold text-red-700">{sellOrders}</p>
         </div>

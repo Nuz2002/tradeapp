@@ -20,6 +20,11 @@ const OrderCard = ({ order, isExpanded, onToggle }) => {
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
+    
+    // Convert to GMT+6
+    const gmtOffset = 0; // GMT+6
+    date.setHours(date.getHours() + gmtOffset); // Adjust time to GMT+6
+    
     return new Intl.DateTimeFormat('en-GB', {
       day: '2-digit',
       month: '2-digit',
@@ -29,6 +34,7 @@ const OrderCard = ({ order, isExpanded, onToggle }) => {
       hour12: false
     }).format(date).replace(',', '');
   };
+  
 
   return (
     <div 
