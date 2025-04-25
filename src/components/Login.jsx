@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -18,7 +18,7 @@ const Login = () => {
     setError('');
   
     try {
-      const res = await axios.post('http://46.101.129.205:80/auth/login/', {
+      const res = await axios.post('http:///46.101.129.205:80/users/login/', {
         email,
         password
       });
@@ -110,9 +110,9 @@ const Login = () => {
 
           {/* Forgot Password */}
           <div className="mt-6 text-center">
-            <a href="#" className="text-sm text-gray-600 hover:text-blue-600 transition-colors">
+            <Link to={"/forgot-password"} className="text-sm text-gray-600 hover:text-blue-600 transition-colors">
               Forgot password?
-            </a>
+            </Link>
           </div>
         </div>
       </div>

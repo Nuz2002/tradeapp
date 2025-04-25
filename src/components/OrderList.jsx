@@ -19,7 +19,7 @@ const OrdersList = () => {
         throw new Error('No refresh token available');
       }
 
-      const response = await axios.post('http://46.101.129.205:80/auth/refresh/', {
+      const response = await axios.post('http://46.101.129.205:80/user/refresh_token/', {
         refresh_token: refreshToken
       });
 
@@ -54,7 +54,7 @@ const OrdersList = () => {
       }
 
       try {
-        const response = await axios.get('http://46.101.129.205:80/order', {
+        const response = await axios.get('http://46.101.129.205/webhook/orders/', {
           headers: {
             Authorization: `Bearer ${token}`
           }
@@ -74,15 +74,16 @@ const OrdersList = () => {
             const newToken = await refreshAccessToken();
             
             // Retry the request with new token
-            const retryResponse = await axios.get('http://46.101.129.205:80/order', {
+            const retryResponse = await axios.get('http://46.101.129.205/webhook/orders/', {
               headers: {
                 Authorization: `Bearer ${newToken}`
               }
             });
             
-            const sortedOrders = retryResponse.data.orders.sort(
+            const sortedOrders = response.data.sort(
               (a, b) => new Date(b.created_at) - new Date(a.created_at)
             );
+            
             setOrders(sortedOrders);
           } catch (refreshError) {
             setError('Authentication failed. Please login again.');
