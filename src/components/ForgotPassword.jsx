@@ -17,7 +17,7 @@ export const ForgotPassword = () => {
 
    // Inside your handleSubmit function:
     try {
-        await axios.post('http://46.101.129.205:80/users/request-password-reset/', { email });
+        await axios.post('http://207.154.244.239/users/request-password-reset/', { email });
         setSuccess(true);
     } catch (err) {
         setError(

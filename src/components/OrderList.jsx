@@ -19,7 +19,7 @@ const OrdersList = () => {
         throw new Error('No refresh token available');
       }
 
-      const response = await axios.post('http://46.101.129.205:80/user/refresh_token/', {
+      const response = await axios.post('http://207.154.244.239/user/refresh_token/', {
         refresh_token: refreshToken
       });
 
@@ -54,7 +54,7 @@ const OrdersList = () => {
       }
 
       try {
-        const response = await axios.get('http://46.101.129.205/webhook/orders/', {
+        const response = await axios.get('http://207.154.244.239/webhook/orders/', {
           headers: {
             Authorization: `Bearer ${token}`
           }
@@ -74,7 +74,7 @@ const OrdersList = () => {
             const newToken = await refreshAccessToken();
             
             // Retry the request with new token
-            const retryResponse = await axios.get('http://46.101.129.205/webhook/orders/', {
+            const retryResponse = await axios.get('http://207.154.244.239/webhook/orders/', {
               headers: {
                 Authorization: `Bearer ${newToken}`
               }

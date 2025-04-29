@@ -20,7 +20,8 @@ const ProtectedRoute = ({ children }) => {
 
       try {
         // Just attempt a real, protected API call to verify token validity
-        await axios.get('http://46.101.129.205/webhook/orders/', {
+        // http://46.101.129.205/
+        await axios.get('http://207.154.244.239/webhook/orders/', {
           headers: {
             Authorization: `Bearer ${token}`
           }
@@ -31,7 +32,7 @@ const ProtectedRoute = ({ children }) => {
         // If token is invalid or expired, try refresh
         if (refreshToken) {
           try {
-            const response = await axios.post('http://46.101.129.205/users/refresh-token/', {
+            const response = await axios.post('http://207.154.244.239/users/refresh-token/', {
               refresh_token: refreshToken
             });
 

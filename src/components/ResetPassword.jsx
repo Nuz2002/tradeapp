@@ -30,7 +30,8 @@ export const ResetPassword = () => {
       console.log("Sending payload to backend:", payload); // <-- Log POST body
 
     try {
-      await axios.post("http://46.101.129.205:80/users/reset-password/", {
+      // http://46.101.129.205:80/
+      await axios.post("http://207.154.244.239/users/reset-password/", {
         token: uid,
         new_password: password,
       });
