@@ -1,119 +1,116 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-import OrderCard from './OrderCard';
-import TradingStats from './TradingStats';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from "react";
+import axios from "axios";
+import OrderCard from "./OrderCard";
+import TradingStats from "./TradingStats";
+import { useNavigate } from "react-router-dom";
+import { FaExchangeAlt } from "react-icons/fa";
 
 const OrdersList = () => {
   const [orders, setOrders] = useState([]);
+  const [systemStatus, setSystemStatus] = useState({
+    trading_enabled: false,
+    active_trades: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
   const navigate = useNavigate();
 
-  // Function to refresh the access token
+  // Calculate inTrade from system status
+  const inTrade = systemStatus.trading_enabled;
+
+  // Compute user balance
+  const rawBalance = orders.reduce((acc, order) => {
+    const pnl = order.price * order.quantity;
+    return order.status === "win" ? acc + pnl : acc - pnl;
+  }, 0);
+
+  // Safely round to avoid showing -0.00
+  const balance =
+    Math.abs(rawBalance) < 0.005 ? 0 : Math.round(rawBalance * 100) / 100;
+
+  // Refresh access token if expired
   const refreshAccessToken = async () => {
     try {
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (!refreshToken) {
-        throw new Error('No refresh token available');
+      const refreshToken = localStorage.getItem("refreshToken");
+      if (!refreshToken) throw new Error("No refresh token");
+
+      const res = await axios.post(
+        "http://46.101.129.205:80/accounts/token/refresh",
+        { refresh_token: refreshToken }
+      );
+
+      localStorage.setItem("token", res.data.access_token);
+      if (res.data.refresh_token) {
+        localStorage.setItem("refreshToken", res.data.refresh_token);
       }
 
-      const response = await axios.post('http://46.101.129.205:80/user/refresh_token/', {
-        refresh_token: refreshToken
-      });
-
-      // Save the new access token
-      localStorage.setItem('token', response.data.access_token);
-      
-      // Optionally update refresh token if returned by API
-      if (response.data.refresh_token) {
-        localStorage.setItem('refreshToken', response.data.refresh_token);
-      }
-      
-      return response.data.access_token;
-    } catch (error) {
-      console.error('Error refreshing token:', error);
-      // If refresh fails, redirect to login
-      localStorage.removeItem('token');
-      localStorage.removeItem('refreshToken');
-      navigate('/login');
-      throw error;
+      return res.data.access_token;
+    } catch (err) {
+      console.error("Error refreshing token:", err);
+      localStorage.removeItem("token");
+      localStorage.removeItem("refreshToken");
+      navigate("/login");
+      throw err;
     }
   };
 
-  useEffect(() => {
-    const fetchOrders = async () => {
-      let token = localStorage.getItem('token');
-      
-      if (!token) {
-        setError('No authentication token found');
-        setLoading(false);
-        navigate('/login');
-        return;
-      }
-
-      try {
-        const response = await axios.get('http://46.101.129.205/webhook/orders/', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
+  // Authenticated GET request with auto-refresh
+  const getWithAuth = async (url) => {
+    let token = localStorage.getItem("token");
+    try {
+      return await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (err) {
+      if (err.response?.status === 401) {
+        token = await refreshAccessToken();
+        return axios.get(url, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-        
-        const sortedOrders = response.data.orders.sort(
-          (a, b) => new Date(b.created_at) - new Date(a.created_at)
-        );
-        setOrders(sortedOrders);
-      } catch (error) {
-        console.error('Error fetching orders:', error);
-        
-        // Check if error is due to unauthorized (token expired)
-        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-          try {
-            // Try to refresh the token
-            const newToken = await refreshAccessToken();
-            
-            // Retry the request with new token
-            const retryResponse = await axios.get('http://46.101.129.205/webhook/orders/', {
-              headers: {
-                Authorization: `Bearer ${newToken}`
-              }
-            });
-            
-            const sortedOrders = response.data.sort(
-              (a, b) => new Date(b.created_at) - new Date(a.created_at)
-            );
-            
-            setOrders(sortedOrders);
-          } catch (refreshError) {
-            setError('Authentication failed. Please login again.');
-          }
-        } else {
-          setError(error.message || 'Failed to fetch orders');
-        }
+      }
+      throw err;
+    }
+  };
+
+  // Fetch trades and system status
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [tradesRes, statusRes] = await Promise.all([
+          getWithAuth("http://46.101.129.205/api/v1/trades/history"),
+          getWithAuth("http://46.101.129.205/api/v1/system/status/"),
+        ]);
+        setOrders(tradesRes.data.trades);
+        setSystemStatus(statusRes.data);
+      } catch (err) {
+        console.error(err);
+        setError(err.message || "Failed to load data");
       } finally {
         setLoading(false);
       }
     };
-    
-    fetchOrders();
-  }, [navigate]);
+
+    loadData();
+  }, []);
 
   const handleToggle = (orderId) => {
-    setExpandedOrderId(prevId => prevId === orderId ? null : orderId);
+    setExpandedOrderId((prev) => (prev === orderId ? null : orderId));
   };
 
   if (loading) {
-    return <div className="text-center p-4">Loading orders...</div>;
+    return <div className="text-center p-4">Loading trades & status...</div>;
   }
 
   if (error) {
     return (
       <div className="text-center p-4 text-red-500">
         <div>Error: {error}</div>
-        <button 
+        <button
           className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg"
-          onClick={() => navigate('/login')}
+          onClick={() => navigate("/login")}
         >
           Go to Login
         </button>
@@ -123,16 +120,54 @@ const OrdersList = () => {
 
   return (
     <div className="container mx-auto p-4">
+      {/* Balance and In-Trade Display */}
+      <div className="mb-8 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-2xl p-6 shadow-md">
+        <div>
+          <span className="text-lg font-semibold text-blue-900">
+            User Balance
+          </span>
+          <div className="text-3xl font-bold text-blue-800 mt-1 tracking-tight">
+            ${balance.toFixed(2)}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <span
+            className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold transition-colors duration-200 ${
+              inTrade
+                ? "bg-blue-100 text-blue-700 border border-blue-300"
+                : "bg-gray-100 text-gray-500 border border-gray-200"
+            }`}
+          >
+            <FaExchangeAlt className="text-base" />
+            In Trade: {inTrade ? "True" : "False"}
+          </span>
+        </div>
+      </div>
+
       <TradingStats orders={orders} />
-      <div className="mt-4 space-y-3">
-        {orders.map(order => (
-          <OrderCard
-            key={order.id}
-            order={order}
-            isExpanded={order.id === expandedOrderId}
-            onToggle={() => handleToggle(order.id)}
-          />
-        ))}
+
+      <div className="mt-6 space-y-4">
+        {orders.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-blue-400">
+            <FaExchangeAlt className="text-4xl mb-2" />
+            <span className="text-lg font-medium">
+              No trades yet. Your trades will appear here!
+            </span>
+          </div>
+        ) : (
+          orders.map((order) => (
+            <OrderCard
+              key={order.id}
+              order={{
+                ...order,
+                qty: order.quantity,
+                displaySide: order.side.toUpperCase(), // for visual display
+              }}
+              isExpanded={order.id === expandedOrderId}
+              onToggle={() => handleToggle(order.id)}
+            />
+          ))
+        )}
       </div>
     </div>
   );
