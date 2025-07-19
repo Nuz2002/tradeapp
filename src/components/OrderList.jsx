@@ -11,6 +11,7 @@ const OrdersList = () => {
     trading_enabled: false,
     active_trades: 0,
   });
+  const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
@@ -18,16 +19,6 @@ const OrdersList = () => {
 
   // Calculate inTrade from system status
   const inTrade = systemStatus.trading_enabled;
-
-  // Compute user balance
-  const rawBalance = orders.reduce((acc, order) => {
-    const pnl = order.price * order.quantity;
-    return order.status === "win" ? acc + pnl : acc - pnl;
-  }, 0);
-
-  // Safely round to avoid showing -0.00
-  const balance =
-    Math.abs(rawBalance) < 0.005 ? 0 : Math.round(rawBalance * 100) / 100;
 
   // Refresh access token if expired
   const refreshAccessToken = async () => {
@@ -73,18 +64,20 @@ const OrdersList = () => {
     }
   };
 
-  // Fetch trades and system status
+  // Fetch trades, system status, and user profile
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       setError(null);
       try {
-        const [tradesRes, statusRes] = await Promise.all([
+        const [tradesRes, statusRes, profileRes] = await Promise.all([
           getWithAuth("http://46.101.129.205/api/v1/trades/history"),
           getWithAuth("http://46.101.129.205/api/v1/system/status/"),
+          getWithAuth("http://46.101.129.205/accounts/profile/"),
         ]);
         setOrders(tradesRes.data.trades);
         setSystemStatus(statusRes.data);
+        setUserProfile(profileRes.data);
       } catch (err) {
         console.error(err);
         setError(err.message || "Failed to load data");
@@ -126,9 +119,13 @@ const OrdersList = () => {
           <span className="text-lg font-semibold text-blue-900">
             User Balance
           </span>
-          <div className="text-3xl font-bold text-blue-800 mt-1 tracking-tight">
-            ${balance.toFixed(2)}
-          </div>
+          {!userProfile ? (
+            <div className="text-gray-500 text-sm">Fetching balance...</div>
+          ) : (
+            <div className="text-3xl font-bold text-blue-800 mt-1 tracking-tight">
+              ${userProfile.balance.toFixed(2)}
+            </div>
+          )}
         </div>
         <div className="flex flex-col items-end gap-2">
           <span
@@ -161,7 +158,7 @@ const OrdersList = () => {
               order={{
                 ...order,
                 qty: order.quantity,
-                displaySide: order.side.toUpperCase(), // for visual display
+                displaySide: order.side.toUpperCase(),
               }}
               isExpanded={order.id === expandedOrderId}
               onToggle={() => handleToggle(order.id)}
