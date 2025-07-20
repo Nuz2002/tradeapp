@@ -1,13 +1,12 @@
-import React, { useState } from "react";
-import axios from "axios";
-import { FaExchangeAlt } from "react-icons/fa";
+import React, { useState, useEffect } from "react";
+import { FaExchangeAlt, FaInfoCircle } from "react-icons/fa";
+import axiosInstance from "./axiosInstance";
 
 const BybitTradingWebhook = () => {
   const [formData, setFormData] = useState({
-    symbol: "",
+    symbol: "SOLUSDT",
     side: "",
     price: "",
-    quantity: "",
     user_email: "",
     order_id: "",
     status: "in_progress",
@@ -19,6 +18,25 @@ const BybitTradingWebhook = () => {
   const [responseMsg, setResponseMsg] = useState(null);
   const [errors, setErrors] = useState({});
 
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const res = await axiosInstance.get("/accounts/profile/");
+        setFormData((prev) => ({
+          ...prev,
+          user_email: res.data.email,
+        }));
+      } catch (err) {
+        console.error(
+          "Profile fetch error:",
+          err.response?.data || err.message
+        );
+      }
+    };
+
+    fetchProfile();
+  }, []);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
@@ -26,7 +44,6 @@ const BybitTradingWebhook = () => {
       [name]: value,
     }));
 
-    // Clear error when user types
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
@@ -43,23 +60,17 @@ const BybitTradingWebhook = () => {
     ];
 
     requiredFields.forEach((field) => {
-      if (!formData[field].trim()) {
+      if (!formData[field]?.toString().trim()) {
         newErrors[field] = "This field is required";
       }
     });
 
-    // Validate numeric fields
-    const numericFields = ["price", "quantity", "take_profit", "stop_loss"];
+    const numericFields = ["price", "take_profit", "stop_loss"];
     numericFields.forEach((field) => {
       if (formData[field] && isNaN(parseFloat(formData[field]))) {
         newErrors[field] = "Must be a valid number";
       }
     });
-
-    // Validate email format
-    if (formData.user_email && !/^\S+@\S+\.\S+$/.test(formData.user_email)) {
-      newErrors.user_email = "Invalid email format";
-    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -75,7 +86,6 @@ const BybitTradingWebhook = () => {
 
     setLoading(true);
 
-    // Prepare payload with proper number conversion
     const payload = {
       symbol: formData.symbol,
       side: formData.side,
@@ -83,7 +93,6 @@ const BybitTradingWebhook = () => {
       user_email: formData.user_email,
       order_id: formData.order_id,
       status: formData.status,
-      ...(formData.quantity && { quantity: parseFloat(formData.quantity) }),
       ...(formData.take_profit && {
         take_profit: parseFloat(formData.take_profit),
       }),
@@ -91,39 +100,23 @@ const BybitTradingWebhook = () => {
     };
 
     try {
-      const res = await axios.post(
-        "http://46.101.129.205/api/v1/trading/",
-        payload,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-        }
-      );
+      const res = await axiosInstance.post("/api/v1/trading/", payload);
 
-      console.log("Webhook Response:", res);
       setResponseMsg({
         text: "Webhook processed successfully!",
         isError: false,
         data: res.data,
       });
-      setFormData({
-        symbol: "",
+
+      setFormData((prev) => ({
+        ...prev,
         side: "",
         price: "",
-        quantity: "",
-        user_email: "",
         order_id: "",
-        status: "",
         take_profit: "",
         stop_loss: "",
-      });
+      }));
     } catch (err) {
-      console.error("Webhook Error:", err);
-
-      // Extract detailed error message if available
       const errorDetail =
         err.response?.data?.detail ||
         err.response?.data?.message ||
@@ -135,225 +128,167 @@ const BybitTradingWebhook = () => {
         data: err.response?.data,
       });
     }
+
     setLoading(false);
   };
 
   return (
-    <div className="p-8">
-      <div className="flex items-center gap-3 mb-6">
-        <FaExchangeAlt className="text-gray-500 text-xl" />
-        <h2 className="text-2xl font-bold text-gray-800">
-          Bybit Trading Webhook
-        </h2>
-      </div>
+    <div className="p-6 max-w-4xl mx-auto">
 
-      <div className="bg-white rounded-2xl shadow-md p-6 border border-gray-100">
-        <p className="text-gray-600 mb-5">
-          Simulate Bybit trading webhooks. Fields marked with * are required.
-        </p>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Required Fields */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Symbol *
-              </label>
-              <input
-                type="text"
+      <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100">
+
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* Trade Configuration Section */}
+          <div className="border-b border-gray-200 pb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <span className="bg-gray-200 w-6 h-6 rounded-full flex items-center justify-center text-xs mr-2">
+                1
+              </span>
+              Trade Configuration
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <InputField
+                label="Symbol *"
                 name="symbol"
-                value={formData.symbol}
-                onChange={handleChange}
-                className={`w-full px-4 py-3 border ${
-                  errors.symbol ? "border-red-300" : "border-gray-300"
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                placeholder="e.g., BTCUSDT"
+                value="SOLUSDT"
+                disabled
               />
-              {errors.symbol && (
-                <p className="mt-1 text-sm text-red-600">{errors.symbol}</p>
-              )}
-            </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Side *
-              </label>
-              <select
+              <SelectField
+                label="Side *"
                 name="side"
                 value={formData.side}
                 onChange={handleChange}
-                className={`w-full px-4 py-3 border ${
-                  errors.side ? "border-red-300" : "border-gray-300"
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-              >
-                <option value="">Select side</option>
-                <option value="Buy">Buy</option>
-                <option value="Sell">Sell</option>
-              </select>
-              {errors.side && (
-                <p className="mt-1 text-sm text-red-600">{errors.side}</p>
-              )}
-            </div>
+                error={errors.side}
+                options={[
+                  { label: "Select trading side", value: "" },
+                  { label: "Buy", value: "BUY" },
+                  { label: "Sell", value: "SELL" },
+                ]}
+              />
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Price *
-              </label>
-              <input
-                type="number"
+              <InputField
+                label="Price *"
                 name="price"
                 value={formData.price}
                 onChange={handleChange}
-                step="0.0001"
-                min="0"
-                className={`w-full px-4 py-3 border ${
-                  errors.price ? "border-red-300" : "border-gray-300"
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                placeholder="Trade price"
-              />
-              {errors.price && (
-                <p className="mt-1 text-sm text-red-600">{errors.price}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Quantity
-              </label>
-              <input
+                error={errors.price}
                 type="number"
-                name="quantity"
-                value={formData.quantity}
-                onChange={handleChange}
                 step="0.0001"
                 min="0"
-                className={`w-full px-4 py-3 border ${
-                  errors.quantity ? "border-red-300" : "border-gray-300"
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                placeholder="Trade quantity"
+                placeholder="Enter trade price"
               />
-              {errors.quantity && (
-                <p className="mt-1 text-sm text-red-600">{errors.quantity}</p>
-              )}
-            </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                User Email *
-              </label>
-              <input
-                type="email"
-                name="user_email"
-                value={formData.user_email}
-                onChange={handleChange}
-                className={`w-full px-4 py-3 border ${
-                  errors.user_email ? "border-red-300" : "border-gray-300"
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                placeholder="user@example.com"
-              />
-              {errors.user_email && (
-                <p className="mt-1 text-sm text-red-600">{errors.user_email}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Order ID *
-              </label>
-              <input
-                type="text"
+              <InputField
+                label="Order ID *"
                 name="order_id"
                 value={formData.order_id}
                 onChange={handleChange}
-                className={`w-full px-4 py-3 border ${
-                  errors.order_id ? "border-red-300" : "border-gray-300"
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                placeholder="Order identifier"
+                error={errors.order_id}
+                placeholder="Unique order identifier"
               />
-              {errors.order_id && (
-                <p className="mt-1 text-sm text-red-600">{errors.order_id}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Status *
-              </label>
-              <input
-                type="text"
-                name="status"
-                value="In Progress"
-                readOnly
-                disabled
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
-              />
-            </div>
-
-            {/* Optional Fields */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Take Profit
-              </label>
-              <input
-                type="number"
-                name="take_profit"
-                value={formData.take_profit}
-                onChange={handleChange}
-                step="0.0001"
-                min="0"
-                className={`w-full px-4 py-3 border ${
-                  errors.take_profit ? "border-red-300" : "border-gray-300"
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                placeholder="Take profit price"
-              />
-              {errors.take_profit && (
-                <p className="mt-1 text-sm text-red-600">
-                  {errors.take_profit}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Stop Loss
-              </label>
-              <input
-                type="number"
-                name="stop_loss"
-                value={formData.stop_loss}
-                onChange={handleChange}
-                step="0.0001"
-                min="0"
-                className={`w-full px-4 py-3 border ${
-                  errors.stop_loss ? "border-red-300" : "border-gray-300"
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                placeholder="Stop loss price"
-              />
-              {errors.stop_loss && (
-                <p className="mt-1 text-sm text-red-600">{errors.stop_loss}</p>
-              )}
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-4">
-            <button
-              type="submit"
-              disabled={loading}
-              className={`
-                px-5 py-2.5 rounded-lg font-medium text-white transition-all
-                ${
+          {/* Risk Management Section */}
+          <div className="border-b border-gray-200 pb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <span className="bg-gray-200 w-6 h-6 rounded-full flex items-center justify-center text-xs mr-2">
+                2
+              </span>
+              Risk Management (Optional)
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <InputField
+                label="Take Profit"
+                name="take_profit"
+                value={formData.take_profit}
+                onChange={handleChange}
+                error={errors.take_profit}
+                type="number"
+                step="0.0001"
+                min="0"
+                placeholder="Profit target price"
+              />
+
+              <InputField
+                label="Stop Loss"
+                name="stop_loss"
+                value={formData.stop_loss}
+                onChange={handleChange}
+                error={errors.stop_loss}
+                type="number"
+                step="0.0001"
+                min="0"
+                placeholder="Risk limit price"
+              />
+            </div>
+          </div>
+
+          {/* System Information */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+              <span className="bg-gray-200 w-6 h-6 rounded-full flex items-center justify-center text-xs mr-2">
+                3
+              </span>
+              System Information
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <InputField
+                label="Status"
+                name="status"
+                value="In Progress"
+                disabled
+              />
+
+              <InputField
+                label="User Account"
+                name="user_email"
+                value={formData.user_email}
+                disabled
+              />
+            </div>
+          </div>
+
+          {/* Action Section */}
+          <div className="pt-4">
+            <div className="flex items-center justify-between border-t border-gray-200 pt-6">
+              <div>
+                {responseMsg && (
+                  <div
+                    className={`p-3 rounded-lg text-sm ${
+                      responseMsg.isError
+                        ? "bg-red-50 text-red-700"
+                        : "bg-green-50 text-green-700"
+                    }`}
+                  >
+                    {responseMsg.text}
+                    {responseMsg.data && (
+                      <div className="mt-3 p-2 bg-blue-50 rounded text-xs font-mono overflow-x-auto">
+                        <pre>{JSON.stringify(responseMsg.data, null, 2)}</pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              <button
+                type="submit"
+                disabled={loading}
+                className={`px-5 py-2.5 rounded-lg font-medium text-white transition-all flex items-center gap-2 min-w-[150px] justify-center ${
                   loading
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-md"
                 }`}
-            >
-              <div className="flex items-center gap-2">
+              >
                 {loading ? (
                   <span className="flex items-center">
                     <svg
                       className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
                       viewBox="0 0 24 24"
                     >
                       <circle
@@ -367,7 +302,7 @@ const BybitTradingWebhook = () => {
                       <path
                         className="opacity-75"
                         fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                       ></path>
                     </svg>
                     Processing...
@@ -375,33 +310,57 @@ const BybitTradingWebhook = () => {
                 ) : (
                   <>
                     <FaExchangeAlt className="text-sm" />
-                    Send Webhook
+                    Execute Webhook
                   </>
                 )}
-              </div>
-            </button>
-          </div>
-
-          {responseMsg && (
-            <div
-              className={`p-3 rounded-lg text-sm border ${
-                responseMsg.isError
-                  ? "bg-red-50 text-red-700 border-red-100"
-                  : "bg-green-50 text-green-700 border-green-100"
-              }`}
-            >
-              {responseMsg.text}
-              {responseMsg.data && (
-                <div className="mt-3 p-2 bg-blue-50 rounded text-xs font-mono overflow-x-auto">
-                  <pre>{JSON.stringify(responseMsg.data, null, 2)}</pre>
-                </div>
-              )}
+              </button>
             </div>
-          )}
+          </div>
         </form>
       </div>
     </div>
   );
 };
+
+const InputField = ({ label, name, value, onChange, error, ...rest }) => (
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      {label}
+    </label>
+    <input
+      name={name}
+      value={value}
+      onChange={onChange}
+      className={`w-full px-4 py-3 border ${
+        error ? "border-red-300" : "border-gray-300"
+      } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors`}
+      {...rest}
+    />
+    {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+  </div>
+);
+
+const SelectField = ({ label, name, value, onChange, error, options }) => (
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-2">
+      {label}
+    </label>
+    <select
+      name={name}
+      value={value}
+      onChange={onChange}
+      className={`w-full px-4 py-3 border ${
+        error ? "border-red-300" : "border-gray-300"
+      } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors appearance-none bg-[url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiAjdjQ2NTc1IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBvbHlsaW5lIHBvaW50cz0iNiA5IDEyIDE1IDE4IDkiPjwvcG9seWxpbmU+PC9zdmc+")] bg-no-repeat bg-[right:0.75rem_center] bg-[length:1.25rem]`}
+    >
+      {options.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
+    {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+  </div>
+);
 
 export default BybitTradingWebhook;

@@ -14,7 +14,7 @@ const BybitLiveFeed = () => {
       setConnected(true);
       ws.send(JSON.stringify({
         op: 'subscribe',
-        args: ['publicTrade.BTCUSDT'] // You can change the symbol/channel later
+        args: ['publicTrade.SOLUSDT'] // You can change the symbol/channel later
       }));
     };
 

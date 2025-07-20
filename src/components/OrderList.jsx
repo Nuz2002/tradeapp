@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
+import { useNavigate } from "react-router-dom";
 import OrderCard from "./OrderCard";
 import TradingStats from "./TradingStats";
-import { useNavigate } from "react-router-dom";
 import { FaExchangeAlt } from "react-icons/fa";
+import axiosInstance from "./axiosInstance";
 
 const OrdersList = () => {
   const [orders, setOrders] = useState([]);
@@ -17,77 +17,36 @@ const OrdersList = () => {
   const [expandedOrderId, setExpandedOrderId] = useState(null);
   const navigate = useNavigate();
 
-  // Calculate inTrade from system status
   const inTrade = systemStatus.trading_enabled;
 
-  // Refresh access token if expired
-  const refreshAccessToken = async () => {
-    try {
-      const refreshToken = localStorage.getItem("refreshToken");
-      if (!refreshToken) throw new Error("No refresh token");
-
-      const res = await axios.post(
-        "http://46.101.129.205:80/accounts/token/refresh",
-        { refresh_token: refreshToken }
-      );
-
-      localStorage.setItem("token", res.data.access_token);
-      if (res.data.refresh_token) {
-        localStorage.setItem("refreshToken", res.data.refresh_token);
-      }
-
-      return res.data.access_token;
-    } catch (err) {
-      console.error("Error refreshing token:", err);
-      localStorage.removeItem("token");
-      localStorage.removeItem("refreshToken");
-      navigate("/login");
-      throw err;
-    }
-  };
-
-  // Authenticated GET request with auto-refresh
-  const getWithAuth = async (url) => {
-    let token = localStorage.getItem("token");
-    try {
-      return await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    } catch (err) {
-      if (err.response?.status === 401) {
-        token = await refreshAccessToken();
-        return axios.get(url, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
-      throw err;
-    }
-  };
-
-  // Fetch trades, system status, and user profile
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       setError(null);
       try {
         const [tradesRes, statusRes, profileRes] = await Promise.all([
-          getWithAuth("http://46.101.129.205/api/v1/trades/history"),
-          getWithAuth("http://46.101.129.205/api/v1/system/status/"),
-          getWithAuth("http://46.101.129.205/accounts/profile/"),
+          axiosInstance.get("/api/v1/trades/history"),
+          axiosInstance.get("/api/v1/system/status/"),
+          axiosInstance.get("/accounts/profile/"),
         ]);
+
         setOrders(tradesRes.data.trades);
         setSystemStatus(statusRes.data);
         setUserProfile(profileRes.data);
       } catch (err) {
-        console.error(err);
-        setError(err.message || "Failed to load data");
+        console.error("Data fetch error:", err);
+        if (err.response?.status === 401) {
+          navigate("/login");
+        } else {
+          setError(err.message || "Failed to load data");
+        }
       } finally {
         setLoading(false);
       }
     };
 
     loadData();
-  }, []);
+  }, [navigate]);
 
   const handleToggle = (orderId) => {
     setExpandedOrderId((prev) => (prev === orderId ? null : orderId));
@@ -116,9 +75,7 @@ const OrdersList = () => {
       {/* Balance and In-Trade Display */}
       <div className="mb-8 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-2xl p-6 shadow-md">
         <div>
-          <span className="text-lg font-semibold text-blue-900">
-            User Balance
-          </span>
+          <span className="text-lg font-semibold text-blue-900">User Balance</span>
           {!userProfile ? (
             <div className="text-gray-500 text-sm">Fetching balance...</div>
           ) : (

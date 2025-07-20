@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { FaRedo } from 'react-icons/fa';
+import axiosInstance from './axiosInstance';
 
 const ResetTradingState = () => {
   const [reason, setReason] = useState('');
@@ -12,22 +12,17 @@ const ResetTradingState = () => {
       alert("Please provide a reason.");
       return;
     }
+
     setLoading(true);
     try {
-      const res = await axios.post(
-        'http://46.101.129.205/api/v1/system/reset-trading-state/',
-        { reason },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          }
-        }
+      const res = await axiosInstance.post(
+        '/api/v1/system/reset-trading-state/',
+        { reason }
       );
+
       console.log(res);
       setResponseMsg({ text: 'Reset successful! Trading state has been cleared.', isError: false });
-      setReason(''); // Clear input after successful reset
+      setReason('');
     } catch (err) {
       setResponseMsg({ 
         text: 'Reset failed: ' + (err.response?.data?.detail || err.message),
