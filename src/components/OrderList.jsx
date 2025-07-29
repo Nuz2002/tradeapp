@@ -7,31 +7,26 @@ import axiosInstance from "./axiosInstance";
 
 const OrdersList = () => {
   const [orders, setOrders] = useState([]);
-  const [systemStatus, setSystemStatus] = useState({
-    trading_enabled: false,
-    active_trades: 0,
-  });
+  const [inTrade, setInTrade] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
   const navigate = useNavigate();
 
-  const inTrade = systemStatus.trading_enabled;
-
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       setError(null);
       try {
-        const [tradesRes, statusRes, profileRes] = await Promise.all([
+        const [tradesRes, metricsRes, profileRes] = await Promise.all([
           axiosInstance.get("/api/v1/trades/history"),
-          axiosInstance.get("/api/v1/system/status/"),
+          axiosInstance.get("/api/v1/trades/metrics/"),
           axiosInstance.get("/accounts/profile/"),
         ]);
 
         setOrders(tradesRes.data.trades);
-        setSystemStatus(statusRes.data);
+        setInTrade(metricsRes.data.inTrade);
         setUserProfile(profileRes.data);
       } catch (err) {
         console.error("Data fetch error:", err);

@@ -1,59 +1,231 @@
-import React, { useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
-import { FaChartLine, FaCalendarAlt } from 'react-icons/fa';
+// BalanceChart.jsx
+import React, { useEffect, useState } from "react";
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
+import { FaChartLine, FaChevronDown } from "react-icons/fa";
 
-const BalanceChart = () => {
-  const [timePeriod, setTimePeriod] = useState('7d');
+const PERIODS = [
+  { label: "Today", value: "today" },
+  { label: "Last 7d", value: "7d" },
+  { label: "Monthly", value: "monthly" },
+];
 
-  // Dummy balance data - simulating realistic trading balance changes
-  const generateDummyData = (days) => {
-    const data = [];
-    const baseBalance = 10000;
-    let currentBalance = baseBalance;
-    
-    for (let i = days; i >= 0; i--) {
-      // Simulate realistic balance fluctuations
-      const change = (Math.random() - 0.5) * 200; // Random change between -100 and +100
-      currentBalance += change;
-      
-      // Ensure balance doesn't go negative
-      currentBalance = Math.max(currentBalance, 1000);
-      
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      
-      data.push({
-        date: date.toLocaleDateString('en-US', { 
-          month: 'short', 
-          day: 'numeric',
-          ...(days > 7 && { year: '2-digit' })
-        }),
-        balance: Math.round(currentBalance * 100) / 100,
-        timestamp: date.getTime()
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+export default function BalanceChart() {
+  const [period, setPeriod] = useState("7d");
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [metrics, setMetrics] = useState({
+    total_trades: 0,
+    total_wins: 0,
+    total_losses: 0,
+    winrate_percent: 0,
+    money_made: 0,
+    accumulated_r: 0,
+    inTrade: false,
+  });
+  const [trades, setTrades] = useState([]);
+  const [chartData, setChartData] = useState([]);
+  const [showMonthDropdown, setShowMonthDropdown] = useState(false);
+  const [showYearDropdown, setShowYearDropdown] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Function to normalize dates to current year
+  const normalizeDateToCurrentYear = (dateString) => {
+    const now = new Date();
+    const tradeDate = new Date(dateString);
+
+    return new Date(
+      now.getFullYear(), // Use current year
+      tradeDate.getMonth(),
+      tradeDate.getDate(),
+      tradeDate.getHours(),
+      tradeDate.getMinutes(),
+      tradeDate.getSeconds()
+    ).toISOString();
+  };
+
+  // Fetch trade data from API
+  useEffect(() => {
+    const fetchTrades = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(
+          "http://46.101.129.205/api/v1/trades/history"
+        );
+        const data = await response.json();
+
+        if (data.trades && data.trades.length > 0) {
+          // Transform trades and calculate profit
+          const processedTrades = data.trades.map((trade) => {
+            const tradeValue = trade.price * trade.quantity;
+            let profit;
+
+            if (trade.side === "BUY") {
+              profit =
+                trade.status === "win"
+                  ? (trade.take_profit - trade.price) * trade.quantity
+                  : (trade.stop_loss - trade.price) * trade.quantity;
+            } else {
+              // SELL
+              profit =
+                trade.status === "win"
+                  ? (trade.price - trade.take_profit) * trade.quantity
+                  : (trade.price - trade.stop_loss) * trade.quantity;
+            }
+
+            return {
+              ...trade,
+              profit,
+              timestamp: normalizeDateToCurrentYear(trade.created_at),
+              tradeValue,
+            };
+          });
+
+          setTrades(processedTrades);
+        } else {
+          console.log("No trades found in API response");
+        }
+      } catch (error) {
+        console.error("Failed to fetch trades:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTrades();
+  }, []);
+
+  // Calculate metrics from trades
+  useEffect(() => {
+    if (trades.length === 0) return;
+
+    const total_trades = trades.length;
+    const total_wins = trades.filter((t) => t.status === "win").length;
+    const total_losses = total_trades - total_wins;
+    const winrate_percent =
+      total_trades > 0 ? (total_wins / total_trades) * 100 : 0;
+    const money_made = trades.reduce((sum, trade) => sum + trade.profit, 0);
+
+    // Calculate accumulated R (risk-reward ratio)
+    let accumulated_r = 0;
+    trades.forEach((trade) => {
+      const risk = Math.abs(trade.price - trade.stop_loss) * trade.quantity;
+      if (risk > 0) {
+        accumulated_r += trade.profit / risk;
+      }
+    });
+
+    setMetrics({
+      total_trades,
+      total_wins,
+      total_losses,
+      winrate_percent,
+      money_made,
+      accumulated_r,
+      inTrade: false, // Not provided in API, set to false
+    });
+  }, [trades]);
+
+  // Build chart data based on selected period
+  useEffect(() => {
+    if (trades.length === 0) return;
+
+    const now = new Date();
+    let buckets = {};
+
+    if (period === "monthly") {
+      // Monthly data for selected year
+      const filteredTrades = trades.filter((trade) => {
+        const d = new Date(trade.timestamp);
+        return d.getFullYear() === selectedYear;
       });
+
+      filteredTrades.forEach((t) => {
+        const d = new Date(t.timestamp);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+          2,
+          "0"
+        )}`;
+        buckets[key] = (buckets[key] || 0) + t.profit;
+      });
+
+      // Fill in all months for the year
+      const yearData = [];
+      for (let month = 0; month < 12; month++) {
+        const key = `${selectedYear}-${String(month + 1).padStart(2, "0")}`;
+        yearData.push({
+          label: MONTHS[month].substring(0, 3),
+          profit: buckets[key] || 0,
+          fullMonth: MONTHS[month],
+        });
+      }
+      setChartData(yearData);
+    } else {
+      // Daily data
+      const days = period === "today" ? 1 : parseInt(period, 10);
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        buckets[d.toISOString().slice(0, 10)] = 0;
+      }
+
+      trades.forEach((t) => {
+        const dateKey = new Date(t.timestamp).toISOString().slice(0, 10);
+        if (buckets[dateKey] !== undefined) {
+          buckets[dateKey] += t.profit;
+        }
+      });
+
+      setChartData(
+        Object.entries(buckets).map(([date, profit]) => ({
+          label: new Date(date).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+          }),
+          profit: Math.round(profit * 100) / 100,
+          fullDate: date,
+        }))
+      );
     }
-    
-    return data;
-  };
+  }, [trades, period, selectedYear]);
 
-  const getData = () => {
-    const days = timePeriod === '7d' ? 7 : timePeriod === '30d' ? 30 : 90;
-    return generateDummyData(days);
-  };
-
-  const data = getData();
-  const currentBalance = data[data.length - 1]?.balance || 0;
-  const previousBalance = data[data.length - 2]?.balance || 0;
-  const change = currentBalance - previousBalance;
-  const changePercent = previousBalance ? ((change / previousBalance) * 100) : 0;
-
+  // Custom tooltip component
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
+      const data = payload[0].payload;
       return (
-        <div className="bg-white p-3 rounded-lg shadow-lg border border-gray-200">
-          <p className="text-sm text-gray-600">{label}</p>
-          <p className="text-lg font-semibold text-gray-800">
-            ${payload[0].value.toLocaleString()}
+        <div className="bg-white p-3 rounded-lg shadow-lg border border-gray-100">
+          <p className="font-semibold text-gray-800">
+            {period === "monthly" ? data.fullMonth : data.fullDate}
+          </p>
+          <p
+            className={`${
+              payload[0].value >= 0 ? "text-green-600" : "text-red-600"
+            }`}
+          >
+            Profit: ${payload[0].value.toFixed(2)}
           </p>
         </div>
       );
@@ -61,144 +233,182 @@ const BalanceChart = () => {
     return null;
   };
 
+  if (loading) {
+    return (
+      <div className="p-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl shadow-lg text-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+        <p className="mt-4 text-gray-600">Loading trade data...</p>
+      </div>
+    );
+  }
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <FaChartLine className="text-gray-400 text-xl" />
-          <h2 className="text-2xl font-bold text-gray-800">Balance Overview</h2>
+    <div className="p-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl shadow-lg space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-bold flex items-center gap-2 text-gray-800">
+            <FaChartLine className="text-blue-600" /> Balance & P/L
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Track your trading performance over time
+          </p>
         </div>
-        
-        {/* Time Period Filter */}
-        <div className="flex items-center gap-2 bg-white rounded-xl border border-gray-200 p-1">
-          {['7d', '30d', '90d'].map((period) => (
-            <button
-              key={period}
-              onClick={() => setTimePeriod(period)}
-              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                timePeriod === period
-                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {period}
-            </button>
-          ))}
+
+        <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
+            {PERIODS.map((o) => (
+              <button
+                key={o.value}
+                onClick={() => setPeriod(o.value)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  period === o.value
+                    ? "bg-blue-600 text-white shadow-md"
+                    : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+
+          {period === "monthly" && (
+            <div className="flex gap-2">
+              <div className="relative">
+                <button
+                  onClick={() => setShowMonthDropdown(!showMonthDropdown)}
+                  className="flex items-center gap-1 bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  {MONTHS[selectedMonth]} <FaChevronDown className="text-xs" />
+                </button>
+                {showMonthDropdown && (
+                  <div className="absolute top-full left-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-200 z-10 max-h-60 overflow-y-auto">
+                    {MONTHS.map((month, index) => (
+                      <button
+                        key={month}
+                        onClick={() => {
+                          setSelectedMonth(index);
+                          setShowMonthDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${
+                          selectedMonth === index
+                            ? "bg-blue-50 text-blue-700"
+                            : "text-gray-700"
+                        }`}
+                      >
+                        {month}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="relative">
+                <button
+                  onClick={() => setShowYearDropdown(!showYearDropdown)}
+                  className="flex items-center gap-1 bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  {selectedYear} <FaChevronDown className="text-xs" />
+                </button>
+                {showYearDropdown && (
+                  <div className="absolute top-full left-0 mt-1 w-24 bg-white rounded-lg shadow-lg border border-gray-200 z-10 max-h-60 overflow-y-auto">
+                    {YEARS.map((year) => (
+                      <button
+                        key={year}
+                        onClick={() => {
+                          setSelectedYear(year);
+                          setShowYearDropdown(false);
+                        }}
+                        className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-100 ${
+                          selectedYear === year
+                            ? "bg-blue-50 text-blue-700"
+                            : "text-gray-700"
+                        }`}
+                      >
+                        {year}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Balance Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-2xl p-4 shadow-md border border-gray-100">
-          <p className="text-xs text-gray-500 mb-1">Current Balance</p>
-          <p className="text-2xl font-bold text-gray-800">${currentBalance.toLocaleString()}</p>
-        </div>
-        
-        <div className="bg-white rounded-2xl p-4 shadow-md border border-gray-100">
-          <p className="text-xs text-gray-500 mb-1">Change</p>
-          <p className={`text-lg font-semibold ${change >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-            {change >= 0 ? '+' : ''}${change.toFixed(2)}
-          </p>
-        </div>
-        
-        <div className="bg-white rounded-2xl p-4 shadow-md border border-gray-100">
-          <p className="text-xs text-gray-500 mb-1">Change %</p>
-          <p className={`text-lg font-semibold ${changePercent >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-            {changePercent >= 0 ? '+' : ''}{changePercent.toFixed(2)}%
-          </p>
-        </div>
-      </div>
-
-      {/* Chart */}
-      <div className="bg-white rounded-2xl shadow-md p-6 border border-gray-100">
-        <ResponsiveContainer width="100%" height={400}>
-          <AreaChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+      <div className="w-full h-72">
+        <ResponsiveContainer>
+          <AreaChart data={chartData}>
             <defs>
-              <linearGradient id="balanceGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.1}/>
-                <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
+              <linearGradient id="profitGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.4} />
+                <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1} />
               </linearGradient>
             </defs>
-            
-            <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-            
-            <XAxis 
-              dataKey="date" 
-              stroke="#9ca3af"
-              fontSize={12}
+            <CartesianGrid
+              stroke="#f0f0f0"
+              strokeDasharray="3 3"
+              vertical={false}
+            />
+            <XAxis dataKey="label" tick={{ fontSize: 12 }} tickLine={false} />
+            <YAxis
+              tickFormatter={(v) => `$${v}`}
+              tick={{ fontSize: 12 }}
               tickLine={false}
               axisLine={false}
             />
-            
-            <YAxis 
-              stroke="#9ca3af"
-              fontSize={12}
-              tickLine={false}
-              axisLine={false}
-              tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-            />
-            
             <Tooltip content={<CustomTooltip />} />
-            
             <Area
               type="monotone"
-              dataKey="balance"
+              dataKey="profit"
               stroke="#3B82F6"
               strokeWidth={2}
-              fill="url(#balanceGradient)"
-              dot={{ fill: '#3B82F6', strokeWidth: 2, r: 4 }}
-              activeDot={{ r: 6, stroke: '#3B82F6', strokeWidth: 2 }}
+              fill="url(#profitGradient)"
+              activeDot={{ r: 6, fill: "#2563EB" }}
             />
           </AreaChart>
         </ResponsiveContainer>
       </div>
 
-      {/* Additional Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-        <div className="bg-white rounded-2xl p-4 shadow-md border border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Performance Summary</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Highest Balance</span>
-              <span className="font-medium text-gray-800">
-                ${Math.max(...data.map(d => d.balance)).toLocaleString()}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Lowest Balance</span>
-              <span className="font-medium text-gray-800">
-                ${Math.min(...data.map(d => d.balance)).toLocaleString()}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Average Balance</span>
-              <span className="font-medium text-gray-800">
-                ${(data.reduce((sum, d) => sum + d.balance, 0) / data.length).toFixed(0)}
-              </span>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-white rounded-2xl p-4 shadow-md border border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Trading Activity</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Total Trades</span>
-              <span className="font-medium text-gray-800">24</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Win Rate</span>
-              <span className="font-medium text-green-600">68%</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Active Positions</span>
-              <span className="font-medium text-blue-600">2</span>
-            </div>
-          </div>
-        </div>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label="Total Trades" value={metrics.total_trades} />
+        <StatCard
+          label="Wins"
+          value={metrics.total_wins}
+          valueClass="text-green-600"
+        />
+        <StatCard
+          label="Losses"
+          value={metrics.total_losses}
+          valueClass="text-red-600"
+        />
+        <StatCard
+          label="Win Rate"
+          value={`${metrics.winrate_percent.toFixed(1)}%`}
+          valueClass="text-blue-600"
+        />
+        <StatCard
+          label="Money Made"
+          value={`$${metrics.money_made.toFixed(2)}`}
+          valueClass="text-green-600"
+        />
+        <StatCard
+          label="Accumulated R"
+          value={metrics.accumulated_r.toFixed(2)}
+          valueClass="text-purple-600"
+        />
+        <StatCard
+          label="In Trade"
+          value={metrics.inTrade ? "Yes" : "No"}
+          valueClass={metrics.inTrade ? "text-green-600" : "text-gray-600"}
+        />
       </div>
     </div>
   );
-};
+}
 
-export default BalanceChart; 
+const StatCard = ({ label, value, valueClass = "text-gray-800" }) => (
+  <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+    <div className="text-xs text-gray-500 font-medium">{label}</div>
+    <div className={`mt-1 text-lg font-bold ${valueClass}`}>{value}</div>
+  </div>
+);

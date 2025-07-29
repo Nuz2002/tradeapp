@@ -1,21 +1,10 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom';
-// import Header from './components/Header'; // Remove header
-import OrderList from './components/OrderList';
+import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom'
 import Login from './components/Login';
 import ProtectedRoute from './components/ProtectedRoute'; // <-- import it
 import { ForgotPassword } from './components/ForgotPassword';
 import { ResetPassword } from './components/ResetPassword';
 import SidebarLayout from './components/SidebarLayout'; // Will create this
-
-function Layout() {
-  return (
-    <>
-      {/* <Header /> */}
-      <Outlet />
-    </>
-  );
-}
 
 function App() {
   return (

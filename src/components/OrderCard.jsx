@@ -18,7 +18,11 @@ const OrderCard = ({ order, isExpanded, onToggle }) => {
   const sideTextColor = order.side === 'Buy' ? 'text-green-700' : 'text-red-700';
 
   const formatNumber = (value) => 
-    Number(value).toLocaleString(undefined, { maximumFractionDigits: 8 });
+    Number(value).toLocaleString(undefined, { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+    });
+
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -87,11 +91,11 @@ const OrderCard = ({ order, isExpanded, onToggle }) => {
             <div className="flex justify-between">
               <div>
                 <p className="text-xs text-gray-500">Take Profit</p>
-                <p className="font-medium text-green-700">${formatNumber(order.takeProfit)}</p>
+                <p className="font-medium text-green-700">${formatNumber(order.take_profit)}</p>
               </div>
               <div>
                 <p className="text-xs text-gray-500">Stop Loss</p>
-                <p className="font-medium text-red-600">${formatNumber(order.stopLoss)}</p>
+                <p className="font-medium text-red-600">${formatNumber(order.stop_loss)}</p>
               </div>
             </div>
           </div>
