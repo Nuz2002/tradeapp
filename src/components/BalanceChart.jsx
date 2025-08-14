@@ -1,4 +1,4 @@
-// BalanceChart.jsx
+// src/components/BalanceChart.jsx
 import React, { useEffect, useState } from "react";
 import {
   ResponsiveContainer,
@@ -10,6 +10,7 @@ import {
   Tooltip,
 } from "recharts";
 import { FaChartLine, FaChevronDown } from "react-icons/fa";
+import axiosInstance from "./axiosInstance";
 
 const PERIODS = [
   { label: "Today", value: "today" },
@@ -32,11 +33,19 @@ const MONTHS = [
   "December",
 ];
 
+const PAGE_SIZE = 50; // fetch 50 trades per request when loading history (adjustable)
+
 export default function BalanceChart() {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const YEARS = Array.from({ length: 6 }).map((_, i) => currentYear - i); // current year and last 5 years
+
   const [period, setPeriod] = useState("7d");
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+
   const [metrics, setMetrics] = useState({
+    period: "all",
     total_trades: 0,
     total_wins: 0,
     total_losses: 0,
@@ -45,187 +54,267 @@ export default function BalanceChart() {
     accumulated_r: 0,
     inTrade: false,
   });
-  const [trades, setTrades] = useState([]);
+
+  const [trades, setTrades] = useState([]); // full fetched trades (all pages)
   const [chartData, setChartData] = useState([]);
   const [showMonthDropdown, setShowMonthDropdown] = useState(false);
   const [showYearDropdown, setShowYearDropdown] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingHistory, setLoadingHistory] = useState(true);
 
-  // Function to normalize dates to current year
+  // Normalize a trade date into current year (keeps month/day/time but forces current year)
   const normalizeDateToCurrentYear = (dateString) => {
-    const now = new Date();
+    if (!dateString) return null;
     const tradeDate = new Date(dateString);
-
-    return new Date(
-      now.getFullYear(), // Use current year
+    if (isNaN(tradeDate.getTime())) return dateString; // fallback
+    const now = new Date();
+    const normalized = new Date(
+      now.getFullYear(),
       tradeDate.getMonth(),
       tradeDate.getDate(),
       tradeDate.getHours(),
       tradeDate.getMinutes(),
       tradeDate.getSeconds()
-    ).toISOString();
+    );
+    return normalized.toISOString();
   };
 
-  // Fetch trade data from API
+  // Helper to extract trades array from different response shapes
+  const extractTradesArray = (data) => {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.trades)) return data.trades;
+    if (Array.isArray(data.results)) return data.results;
+    if (Array.isArray(data.data)) return data.data;
+    if (Array.isArray(data.items)) return data.items;
+    // fallback: find first array value
+    const firstArray = Object.values(data).find((v) => Array.isArray(v));
+    return firstArray || [];
+  };
+
+  // Build profit for a trade (robust to missing fields)
+  const calcProfit = (trade) => {
+    const price = Number(trade.price ?? trade.entry_price ?? 0);
+    const qty = Number(trade.quantity ?? trade.qty ?? 0);
+    const take = Number(trade.take_profit ?? trade.tp ?? 0);
+    const stop = Number(trade.stop_loss ?? trade.sl ?? 0);
+    const side = (trade.side || "").toString().toUpperCase();
+    const status = (trade.status || trade.result || "")
+      .toString()
+      .toLowerCase();
+
+    let profit = 0;
+    if (side === "BUY") {
+      if (status === "win") {
+        profit = (take || price) - price;
+      } else {
+        profit = (stop || price) - price;
+      }
+    } else if (side === "SELL") {
+      if (status === "win") {
+        profit = price - (take || price);
+      } else {
+        profit = price - (stop || price);
+      }
+    } else {
+      profit = Number(trade.profit ?? 0);
+    }
+
+    return profit * qty;
+  };
+
+  // Fetch metrics and full history (paginated)
   useEffect(() => {
-    const fetchTrades = async () => {
+    let mounted = true;
+    const fetchAll = async () => {
+      setLoading(true);
+      setLoadingHistory(true);
       try {
-        setLoading(true);
-        const response = await fetch(
-          "http://46.101.129.205/api/v1/trades/history"
-        );
-        const data = await response.json();
+        // 1) fetch metrics
+        const metricsRes = await axiosInstance.get("/api/v1/trades/metrics/");
+        const metricsData = metricsRes?.data ?? {};
+        if (!mounted) return;
+        const safeNum = (v) =>
+          v === undefined || v === null || Number.isNaN(Number(v))
+            ? 0
+            : Number(v);
+        setMetrics({
+          period: metricsData.period ?? "all",
+          total_trades: safeNum(metricsData.total_trades),
+          total_wins: safeNum(metricsData.total_wins),
+          total_losses: safeNum(metricsData.total_losses),
+          accumulated_r: safeNum(metricsData.accumulated_r),
+          money_made: Number(metricsData.money_made ?? 0),
+          winrate_percent: Number(metricsData.winrate_percent ?? 0),
+          inTrade: Boolean(metricsData.inTrade),
+          _raw: metricsData,
+        });
 
-        if (data.trades && data.trades.length > 0) {
-          // Transform trades and calculate profit
-          const processedTrades = data.trades.map((trade) => {
-            const tradeValue = trade.price * trade.quantity;
-            let profit;
+        // 2) fetch paginated history until done
+        const allTrades = [];
+        let page = 1;
+        const pageSize = PAGE_SIZE;
+        const totalFromMetrics = metricsData?.total_trades
+          ? Number(metricsData.total_trades)
+          : null;
+        const totalPages =
+          totalFromMetrics && totalFromMetrics > 0
+            ? Math.ceil(totalFromMetrics / pageSize)
+            : null;
 
-            if (trade.side === "BUY") {
-              profit =
-                trade.status === "win"
-                  ? (trade.take_profit - trade.price) * trade.quantity
-                  : (trade.stop_loss - trade.price) * trade.quantity;
-            } else {
-              // SELL
-              profit =
-                trade.status === "win"
-                  ? (trade.price - trade.take_profit) * trade.quantity
-                  : (trade.price - trade.stop_loss) * trade.quantity;
-            }
-
-            return {
-              ...trade,
-              profit,
-              timestamp: normalizeDateToCurrentYear(trade.created_at),
-              tradeValue,
-            };
+        while (true) {
+          const res = await axiosInstance.get("/api/v1/trades/history", {
+            params: { page, page_size: pageSize },
           });
+          const data = res?.data ?? {};
+          if (!mounted) return;
 
-          setTrades(processedTrades);
-        } else {
-          console.log("No trades found in API response");
+          const pageTrades = extractTradesArray(data);
+          if (!pageTrades || pageTrades.length === 0) break;
+
+          allTrades.push(...pageTrades);
+
+          if (totalPages) {
+            if (page >= totalPages) break;
+          } else {
+            if (pageTrades.length < pageSize) break;
+          }
+
+          page += 1;
         }
-      } catch (error) {
-        console.error("Failed to fetch trades:", error);
+
+        // Process and normalize trades
+        const processed = allTrades.map((trade) => {
+          const profit = calcProfit(trade);
+          const timestamp = normalizeDateToCurrentYear(
+            trade.created_at ?? trade.timestamp ?? trade.date
+          );
+          const tradeValue =
+            Number(trade.price ?? 0) * Number(trade.quantity ?? 0);
+          return {
+            ...trade,
+            profit,
+            timestamp,
+            tradeValue,
+          };
+        });
+
+        // sort by timestamp ascending
+        processed.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        if (mounted) {
+          setTrades(processed);
+        }
+      } catch (err) {
+        console.error("Failed to fetch metrics or history:", err);
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+          setLoadingHistory(false);
+        }
       }
     };
 
-    fetchTrades();
+    fetchAll();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Calculate metrics from trades
+  // Build chart data (monthly now renders days of selected month)
   useEffect(() => {
-    if (trades.length === 0) return;
-
-    const total_trades = trades.length;
-    const total_wins = trades.filter((t) => t.status === "win").length;
-    const total_losses = total_trades - total_wins;
-    const winrate_percent =
-      total_trades > 0 ? (total_wins / total_trades) * 100 : 0;
-    const money_made = trades.reduce((sum, trade) => sum + trade.profit, 0);
-
-    // Calculate accumulated R (risk-reward ratio)
-    let accumulated_r = 0;
-    trades.forEach((trade) => {
-      const risk = Math.abs(trade.price - trade.stop_loss) * trade.quantity;
-      if (risk > 0) {
-        accumulated_r += trade.profit / risk;
-      }
-    });
-
-    setMetrics({
-      total_trades,
-      total_wins,
-      total_losses,
-      winrate_percent,
-      money_made,
-      accumulated_r,
-      inTrade: false, // Not provided in API, set to false
-    });
-  }, [trades]);
-
-  // Build chart data based on selected period
-  useEffect(() => {
-    if (trades.length === 0) return;
+    if (!trades || trades.length === 0) {
+      setChartData([]);
+      return;
+    }
 
     const now = new Date();
-    let buckets = {};
+    const buckets = {};
 
     if (period === "monthly") {
-      // Monthly data for selected year
-      const filteredTrades = trades.filter((trade) => {
-        const d = new Date(trade.timestamp);
-        return d.getFullYear() === selectedYear;
-      });
+      // Build daily buckets for the selected month/year only
+      const year = Number(selectedYear);
+      const month = Number(selectedMonth); // 0-based
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-      filteredTrades.forEach((t) => {
-        const d = new Date(t.timestamp);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-          2,
-          "0"
-        )}`;
-        buckets[key] = (buckets[key] || 0) + t.profit;
-      });
-
-      // Fill in all months for the year
-      const yearData = [];
-      for (let month = 0; month < 12; month++) {
-        const key = `${selectedYear}-${String(month + 1).padStart(2, "0")}`;
-        yearData.push({
-          label: MONTHS[month].substring(0, 3),
-          profit: buckets[key] || 0,
-          fullMonth: MONTHS[month],
-        });
-      }
-      setChartData(yearData);
-    } else {
-      // Daily data
-      const days = period === "today" ? 1 : parseInt(period, 10);
-      for (let i = days - 1; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(now.getDate() - i);
-        buckets[d.toISOString().slice(0, 10)] = 0;
+      // initialize each day of the month
+      for (let day = 1; day <= daysInMonth; day++) {
+        const d = new Date(year, month, day);
+        const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+        buckets[key] = 0;
       }
 
+      // Aggregate trades that fall into that month/year
       trades.forEach((t) => {
-        const dateKey = new Date(t.timestamp).toISOString().slice(0, 10);
-        if (buckets[dateKey] !== undefined) {
-          buckets[dateKey] += t.profit;
+        const d = new Date(t.timestamp);
+        if (d.getFullYear() === year && d.getMonth() === month) {
+          const key = d.toISOString().slice(0, 10);
+          if (buckets[key] !== undefined) {
+            buckets[key] += Number(t.profit || 0);
+          }
         }
       });
 
-      setChartData(
-        Object.entries(buckets).map(([date, profit]) => ({
-          label: new Date(date).toLocaleDateString("en-US", {
+      // Map to chart data (day labels)
+      const monthData = Object.entries(buckets).map(([date, profit]) => {
+        const d = new Date(date);
+        return {
+          label: d.toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",
-          }),
+          }), // e.g. "Aug 05"
           profit: Math.round(profit * 100) / 100,
           fullDate: date,
-        }))
-      );
-    }
-  }, [trades, period, selectedYear]);
+        };
+      });
 
-  // Custom tooltip component
-  const CustomTooltip = ({ active, payload, label }) => {
+      setChartData(monthData);
+    } else {
+      // period is "today" or "7d" etc. Interpret "today" as 1 day, "7d" as 7 days
+      const days =
+        period === "today" ? 1 : Number(period.replace("d", "")) || 7;
+
+      // initialize last `days` buckets (oldest -> newest)
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        buckets[key] = 0;
+      }
+
+      trades.forEach((t) => {
+        const dKey = new Date(t.timestamp).toISOString().slice(0, 10);
+        if (buckets.hasOwnProperty(dKey)) {
+          buckets[dKey] += Number(t.profit || 0);
+        }
+      });
+
+      const dailyData = Object.entries(buckets).map(([date, profit]) => ({
+        label: new Date(date).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        }),
+        profit: Math.round(profit * 100) / 100,
+        fullDate: date,
+      }));
+      setChartData(dailyData);
+    }
+  }, [trades, period, selectedYear, selectedMonth]);
+
+  // Tooltip for the chart
+  const CustomTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
-      const data = payload[0].payload;
+      const d = payload[0].payload;
+      const profitVal = Number(payload[0].value ?? 0);
       return (
         <div className="bg-white p-3 rounded-lg shadow-lg border border-gray-100">
           <p className="font-semibold text-gray-800">
-            {period === "monthly" ? data.fullMonth : data.fullDate}
+            {d.fullDate || d.fullMonth}
           </p>
           <p
-            className={`${
-              payload[0].value >= 0 ? "text-green-600" : "text-red-600"
-            }`}
+            className={`${profitVal >= 0 ? "text-green-600" : "text-red-600"}`}
           >
-            Profit: ${payload[0].value.toFixed(2)}
+            Profit: ${profitVal.toFixed(2)}
           </p>
         </div>
       );
@@ -237,10 +326,11 @@ export default function BalanceChart() {
     return (
       <div className="p-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl shadow-lg text-center py-12">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-        <p className="mt-4 text-gray-600">Loading trade data...</p>
+        <p className="mt-4 text-gray-600">Loading trade metrics & history...</p>
       </div>
     );
   }
+
   return (
     <div className="p-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl shadow-lg space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -309,7 +399,7 @@ export default function BalanceChart() {
                   {selectedYear} <FaChevronDown className="text-xs" />
                 </button>
                 {showYearDropdown && (
-                  <div className="absolute top-full left-0 mt-1 w-24 bg-white rounded-lg shadow-lg border border-gray-200 z-10 max-h-60 overflow-y-auto">
+                  <div className="absolute top-full left-0 mt-1 w-28 bg-white rounded-lg shadow-lg border border-gray-200 z-10 max-h-60 overflow-y-auto">
                     {YEARS.map((year) => (
                       <button
                         key={year}
@@ -343,6 +433,7 @@ export default function BalanceChart() {
                 <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.1} />
               </linearGradient>
             </defs>
+
             <CartesianGrid
               stroke="#f0f0f0"
               strokeDasharray="3 3"
@@ -368,39 +459,42 @@ export default function BalanceChart() {
         </ResponsiveContainer>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total Trades" value={metrics.total_trades} />
-        <StatCard
-          label="Wins"
-          value={metrics.total_wins}
-          valueClass="text-green-600"
-        />
-        <StatCard
-          label="Losses"
-          value={metrics.total_losses}
-          valueClass="text-red-600"
-        />
-        <StatCard
-          label="Win Rate"
-          value={`${metrics.winrate_percent.toFixed(1)}%`}
-          valueClass="text-blue-600"
-        />
-        <StatCard
-          label="Money Made"
-          value={`$${metrics.money_made.toFixed(2)}`}
-          valueClass="text-green-600"
-        />
-        <StatCard
-          label="Accumulated R"
-          value={metrics.accumulated_r.toFixed(2)}
-          valueClass="text-purple-600"
-        />
-        <StatCard
-          label="In Trade"
-          value={metrics.inTrade ? "Yes" : "No"}
-          valueClass={metrics.inTrade ? "text-green-600" : "text-gray-600"}
-        />
+      {/* All-time stats (server metrics) */}
+      <div className="mt-6">
+        <p className="text-sm text-gray-500 mb-2">All time stats</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Total Trades" value={metrics.total_trades} />
+          <StatCard
+            label="Wins"
+            value={metrics.total_wins}
+            valueClass="text-green-600"
+          />
+          <StatCard
+            label="Losses"
+            value={metrics.total_losses}
+            valueClass="text-red-600"
+          />
+          <StatCard
+            label="Win Rate"
+            value={`${Number(metrics.winrate_percent ?? 0).toFixed(1)}%`}
+            valueClass="text-blue-600"
+          />
+          <StatCard
+            label="Money Made"
+            value={Number(metrics.money_made ?? 0).toFixed(2)}
+            valueClass="text-green-600"
+          />
+          <StatCard
+            label="Accumulated R"
+            value={Number(metrics.accumulated_r ?? 0).toFixed(2)}
+            valueClass="text-purple-600"
+          />
+          <StatCard
+            label="In Trade"
+            value={metrics.inTrade ? "Yes" : "No"}
+            valueClass={metrics.inTrade ? "text-green-600" : "text-gray-600"}
+          />
+        </div>
       </div>
     </div>
   );
