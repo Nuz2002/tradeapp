@@ -18,12 +18,14 @@ const Login = () => {
     setError("");
 
     try {
-      const res = await axios.post("http://46.101.129.205/accounts/login/", {
-        email,
-        password,
-      },
-      {withCredentials: true}
-    );
+      const res = await axios.post(
+        "http://46.101.129.205/accounts/login/",
+        {
+          email,
+          password,
+        },
+        { withCredentials: true }
+      );
 
       // Save both access token and refresh token
       localStorage.setItem("token", res.data.access);
@@ -32,7 +34,16 @@ const Login = () => {
       // Redirect after login
       navigate(from, { replace: true });
     } catch (err) {
-      console.log(err.response);
+      console.log("AXIOS ERROR", err);
+
+      if (err.response) {
+        setError(err.response.data?.message || "Login failed.");
+      } else if (err.request) {
+        setError("No response from the server. Possible CORS issue.");
+      } else {
+        setError(err.message || "Unexpected error occured.");
+      }
+
       setError(err.response?.data?.message || "Login failed");
     } finally {
       setIsLoading(false);
@@ -40,7 +51,7 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col items-center justify-start pt-24 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-200 flex flex-col items-center justify-start pt-24 sm:px-6 lg:px-8">
       <div className="w-full max-w-md space-y-8 px-4 sm:px-0">
         {/* Logo Header */}
         <div className="text-center space-y-4">
