@@ -1,5 +1,5 @@
 // src/components/BalanceChart.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -12,6 +12,28 @@ import {
 import { FaChartLine, FaChevronDown } from "react-icons/fa";
 import axiosInstance from "./axiosInstance";
 
+// ======== CONFIG ========
+// safe env detection: prefer Vite import.meta.env, fallback to process.env if present, otherwise "auto"
+const getChartTzFromEnv = () => {
+  try {
+    // Vite / modern bundlers expose import.meta.env
+    if (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_CHART_TZ) {
+      return import.meta.env.VITE_CHART_TZ;
+    }
+  } catch (e) { /* ignore */ }
+
+  // process may be undefined in the browser, so guard it
+  if (typeof process !== "undefined" && process && process.env && process.env.NEXT_PUBLIC_CHART_TZ) {
+    return process.env.NEXT_PUBLIC_CHART_TZ;
+  }
+
+  return "auto";
+};
+
+const CHART_TIME_ZONE = getChartTzFromEnv();
+const FORCE_INITIAL_BALANCE = true;
+const INITIAL_BALANCE = 1000;
+
 const PERIODS = [
   { label: "Today", value: "today" },
   { label: "Last 7d", value: "7d" },
@@ -23,16 +45,41 @@ const MONTHS = [
   "September","October","November","December",
 ];
 
+// ======== TZ HELPERS ========
+const tzOrAuto = (tz) => (tz === "auto" ? undefined : tz);
+
+const makeDayKeyFormatter = (timeZone) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: tzOrAuto(timeZone), year: "numeric", month: "2-digit", day: "2-digit" });
+
+const makeTimeFormatter = (timeZone) =>
+  new Intl.DateTimeFormat(undefined, { timeZone: tzOrAuto(timeZone), hour: "2-digit", minute: "2-digit" });
+
+const makeDateLabelFormatter = (timeZone) =>
+  new Intl.DateTimeFormat(undefined, { timeZone: tzOrAuto(timeZone), month: "short", day: "numeric" });
+
+const makeDateTimeTooltipFormatter = (timeZone) =>
+  new Intl.DateTimeFormat(undefined, { timeZone: tzOrAuto(timeZone), year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" });
+
+function getDayKey(date, fmtDayKey) {
+  return fmtDayKey.format(date); // 'YYYY-MM-DD'
+}
+
+function getYearMonthFromKey(key) {
+  const [y, m] = key.split("-").map((s) => parseInt(s, 10));
+  return { year: y, month: m };
+}
+
 export default function BalanceChart() {
   const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth();
-  const currentDate = now.getDate();
-  const YEARS = Array.from({ length: 6 }).map((_, i) => currentYear - i);
 
   const [period, setPeriod] = useState("7d");
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+
+  const YEARS = useMemo(() => {
+    const currentYear = now.getFullYear();
+    return Array.from({ length: 6 }, (_, i) => currentYear - i);
+  }, [now]);
 
   const [metrics, setMetrics] = useState({
     period: "all",
@@ -51,6 +98,11 @@ export default function BalanceChart() {
   const [showMonthDropdown, setShowMonthDropdown] = useState(false);
   const [showYearDropdown, setShowYearDropdown] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  const fmtDayKey = useMemo(() => makeDayKeyFormatter(CHART_TIME_ZONE), []);
+  const fmtTime = useMemo(() => makeTimeFormatter(CHART_TIME_ZONE), []);
+  const fmtDayLabel = useMemo(() => makeDateLabelFormatter(CHART_TIME_ZONE), []);
+  const fmtTooltip = useMemo(() => makeDateTimeTooltipFormatter(CHART_TIME_ZONE), []);
 
   const parseNumber = (v) => {
     if (v === undefined || v === null) return 0;
@@ -127,105 +179,108 @@ export default function BalanceChart() {
       return;
     }
 
-    const formatHourLabel = (d) =>
-      new Date(d).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    const dayKeysInRange = () => {
+      const keys = new Set();
 
-    const formatDayLabel = (d) =>
-      new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      if (period === "today") {
+        return [getDayKey(new Date(), fmtDayKey)];
+      }
 
-    const toDayStart = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
-    const toDayKey = (d) => toDayStart(d).toISOString().slice(0,10);
-    const toHourKey = (d) => {
-      const x = new Date(d);
-      x.setMinutes(0,0,0);
-      x.setSeconds(0,0);
-      return x.toISOString();
+      if (period === "7d") {
+        const out = [];
+        let cursor = new Date();
+        while (out.length < 7) {
+          const key = getDayKey(cursor, fmtDayKey);
+          if (!keys.has(key)) {
+            out.unshift(key);
+            keys.add(key);
+          }
+          cursor = new Date(cursor.getTime() - 24 * 3600 * 1000);
+        }
+        return out;
+      }
+
+      const year = Number(selectedYear);
+      const monthIndex0 = Number(selectedMonth);
+      const out = [];
+      for (let day = 1; day <= 31; day++) {
+        const tentative = new Date(Date.UTC(year, monthIndex0, day, 12, 0, 0));
+        const key = getDayKey(tentative, fmtDayKey);
+        const { year: ky, month: km } = getYearMonthFromKey(key);
+        if (ky !== year || km !== monthIndex0 + 1) break;
+        out.push(key);
+      }
+      return out;
     };
 
-    const dataPoints = [];
-    const nowLocal = new Date();
+    const tradesByDay = new Map();
+    for (const b of balanceHistory) {
+      const key = getDayKey(b.dateObj, fmtDayKey);
+      if (!tradesByDay.has(key)) tradesByDay.set(key, []);
+      tradesByDay.get(key).push(b);
+    }
+    for (const [, arr] of tradesByDay) arr.sort((a, b) => a.dateObj - b.dateObj);
 
-    if (period === "today") {
-      const start = new Date(nowLocal);
-      start.setHours(0,0,0,0);
+    const keys = dayKeysInRange();
+    const points = [];
 
-      let lastKnown = null;
-      for (let h = 0; h < 24; h++) {
-        const hourStart = new Date(start.getTime() + h * 3600 * 1000);
-        const hourEnd = new Date(start.getTime() + (h + 1) * 3600 * 1000 - 1);
+    keys.forEach((key) => {
+      const trades = tradesByDay.get(key) || [];
+      const dayLabel = (() => {
+        const [y, m, d] = key.split("-").map((n) => parseInt(n, 10));
+        const probe = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+        return fmtDayLabel.format(probe);
+      })();
 
-        const entriesUpToHour = balanceHistory.filter((b) => b.dateObj <= hourEnd);
-        if (entriesUpToHour.length) {
-          lastKnown = entriesUpToHour[entriesUpToHour.length - 1].balance;
-        }
-
-        const isFuture = hourStart > nowLocal;
-        dataPoints.push({
-          key: toHourKey(hourStart),
-          dateObj: hourStart,
-          label: formatHourLabel(hourStart),
-          balance: !isFuture && lastKnown !== null ? Number(lastKnown) : null,
+      if (trades.length === 0) {
+        points.push({
+          key,
+          dateObj: new Date(key),
+          label: dayLabel,
+          balance: null,
+          _emptyDay: true,
         });
+        return;
       }
 
-      const firstKnownIndex = dataPoints.findIndex(p => p.balance !== null);
-      if (firstKnownIndex > 0) {
-        const firstVal = dataPoints[firstKnownIndex].balance ?? 0;
-        for (let i = 0; i < firstKnownIndex; i++) dataPoints[i].balance = firstVal;
-      }
-    } else {
-      let days = [];
-      if (period === "7d") {
-        const todayStart = toDayStart(new Date());
-        for (let i = 6; i >= 0; i--) days.push(new Date(todayStart.getTime() - i * 24 * 3600 * 1000));
-      } else if (period === "monthly") {
-        const year = Number(selectedYear);
-        const month = Number(selectedMonth);
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const isCurrentMonth = year === currentYear && month === currentMonth;
-        const lastDay = isCurrentMonth ? Math.min(currentDate, daysInMonth) : daysInMonth;
-        const selectedIsFuture = year > currentYear || (year === currentYear && month > currentMonth);
-        if (!selectedIsFuture) {
-          for (let day = 1; day <= lastDay; day++) days.push(new Date(year, month, day));
-        }
-      }
-
-      let lastKnown = null;
-      days.forEach((d) => {
-        const dayEnd = new Date(d);
-        dayEnd.setHours(23,59,59,999);
-        const entriesUpToDay = balanceHistory.filter((b) => b.dateObj <= dayEnd);
-        if (entriesUpToDay.length) lastKnown = entriesUpToDay[entriesUpToDay.length - 1].balance;
-        dataPoints.push({
-          key: toDayKey(d),
-          dateObj: toDayStart(d),
-          label: formatDayLabel(d),
-          balance: lastKnown !== null ? Number(lastKnown) : null,
+      trades.forEach((t) => {
+        points.push({
+          key: t.dateObj.toISOString(),
+          dateObj: t.dateObj,
+          label: period === "today" ? fmtTime.format(t.dateObj) : `${dayLabel} ${fmtTime.format(t.dateObj)}`,
+          balance: Number(Number(t.balance).toFixed(2)),
         });
       });
+    });
 
-      const firstKnownIndex = dataPoints.findIndex(p => p.balance !== null);
-      if (firstKnownIndex > 0) {
-        const firstVal = dataPoints[firstKnownIndex].balance ?? 0;
-        for (let i = 0; i < firstKnownIndex; i++) dataPoints[i].balance = firstVal;
+    // Sort and prepend a guaranteed initial point of $1000 just before the earliest real trade
+    points.sort((a, b) => a.dateObj - b.dateObj);
+    const firstRealIndex = points.findIndex(p => p.balance !== null && p.balance !== undefined);
+    if (firstRealIndex !== -1 && FORCE_INITIAL_BALANCE) {
+      if (!(points[0] && points[0]._initial)) {
+        const earliest = points[firstRealIndex];
+        const initialDate = new Date(earliest.dateObj.getTime() - 1000);
+        points.splice(firstRealIndex, 0, {
+          key: "initial-balance",
+          dateObj: initialDate,
+          label: "Initial",
+          balance: Number(INITIAL_BALANCE.toFixed(2)),
+          _initial: true,
+        });
       }
     }
 
-    const hasAnyValue = dataPoints.some((p) => p.balance !== null && p.balance !== undefined);
-    const filled = hasAnyValue
-      ? dataPoints.map(p => ({ ...p, balance: p.balance === null ? null : Number(Number(p.balance).toFixed(2)) }))
-      : [];
-
-    const withDelta = filled.map((p, i) => {
-      let prevIndex = -1;
-      for (let j = i - 1; j >= 0; j--) if (filled[j].balance !== null && filled[j].balance !== undefined) { prevIndex = j; break; }
-      const prevVal = prevIndex >= 0 ? filled[prevIndex].balance : null;
-      const delta = (prevVal !== null && p.balance !== null && prevVal !== undefined && p.balance !== undefined) ? Number((p.balance - prevVal)) : 0;
+    const withDelta = points.map((p, i, arr) => {
+      let prevVal = null;
+      for (let j = i - 1; j >= 0; j--) {
+        if (arr[j].balance !== null && arr[j].balance !== undefined) { prevVal = arr[j].balance; break; }
+      }
+      const delta = (prevVal !== null && p.balance !== null && p.balance !== undefined) ? Number((p.balance - prevVal).toFixed(2)) : 0;
       return { ...p, delta };
     });
 
     setChartData(withDelta);
-  }, [balanceHistory, period, selectedMonth, selectedYear]);
+  }, [balanceHistory, period, selectedMonth, selectedYear, fmtDayKey, fmtDayLabel, fmtTime]);
 
   const CustomTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
@@ -235,7 +290,12 @@ export default function BalanceChart() {
       return (
         <div className="bg-white p-3 rounded-lg shadow-lg border border-gray-100">
           <p className="font-semibold text-gray-800">
-            {d.dateObj ? d.dateObj.toLocaleString() : d.label}
+            {d.dateObj ? (
+              <>
+                {fmtTooltip.format(d.dateObj)}
+                {CHART_TIME_ZONE !== "auto" ? <span className="ml-1 text-gray-400">({CHART_TIME_ZONE})</span> : null}
+              </>
+            ) : d.label}
           </p>
           {balanceVal !== null ? (
             <>
@@ -253,7 +313,6 @@ export default function BalanceChart() {
     return null;
   };
 
-  // Y axis rounding & padding helper: if min===max add small padding
   const yDomainMin = (dataMin, dataMax) => {
     if (dataMin === undefined || dataMin === null || isNaN(dataMin)) return 0;
     if (dataMax !== undefined && Math.abs(dataMax - dataMin) < 1e-9) {
@@ -271,10 +330,7 @@ export default function BalanceChart() {
     return Math.ceil(dataMax * 100) / 100;
   };
 
-  // simple tick interval to avoid overlap
-  const xTickInterval = chartData && chartData.length > 7 ? Math.ceil(chartData.length / 7) - 1 : 0;
-
-  // Determine whether we actually have points to draw
+  const xTickInterval = chartData && chartData.length > 7 ? Math.ceil(chartData.length / 7) : 0;
   const hasChartPoints = chartData && chartData.some((p) => p.balance !== null && p.balance !== undefined);
 
   if (loading) {
@@ -293,7 +349,9 @@ export default function BalanceChart() {
           <h2 className="text-2xl font-bold flex items-center gap-2 text-gray-800">
             <FaChartLine className="text-blue-600" /> Balance & P/L
           </h2>
-          <p className="text-sm text-gray-500 mt-1">Track your account balance over time (balance-history)</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Track your account balance over time
+          </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -302,7 +360,9 @@ export default function BalanceChart() {
               <button
                 key={o.value}
                 onClick={() => setPeriod(o.value)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${period === o.value ? "bg-blue-600 text-white shadow-md" : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"}`}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  period === o.value ? "bg-blue-600 text-white shadow-md" : "bg-white text-gray-600 hover:bg-gray-100 border border-gray-200"
+                }`}
               >
                 {o.label}
               </button>
@@ -364,16 +424,10 @@ export default function BalanceChart() {
               </p>
 
               <div className="mt-4 flex gap-2 justify-center">
-                <button
-                  onClick={() => setPeriod("7d")}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm shadow-sm hover:opacity-95"
-                >
+                <button onClick={() => setPeriod("7d")} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm shadow-sm hover:opacity-95">
                   View last 7 days
                 </button>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm hover:bg-gray-50"
-                >
+                <button onClick={() => window.location.reload()} className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm hover:bg-gray-50">
                   Refresh
                 </button>
               </div>
@@ -395,7 +449,16 @@ export default function BalanceChart() {
               <XAxis dataKey="label" tick={{ fontSize: 12 }} tickLine={false} interval={xTickInterval} minTickGap={8} />
               <YAxis tickFormatter={(v) => `$${Number(v).toFixed(2)}`} tick={{ fontSize: 12 }} tickLine={false} axisLine={false} domain={[yDomainMin, yDomainMax]} />
               <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="balance" stroke="#3B82F6" strokeWidth={2} fill="url(#balanceGradient)" activeDot={{ r: 6, fill: "#2563EB" }} connectNulls={false} />
+              <Area
+                type="monotone"
+                dataKey="balance"
+                stroke="#3B82F6"
+                strokeWidth={2}
+                fill="url(#balanceGradient)"
+                activeDot={{ r: 6, fill: "#2563EB" }}
+                dot={{ r: 3 }}
+                connectNulls={period === "today"}
+              />
             </AreaChart>
           </ResponsiveContainer>
         )}
